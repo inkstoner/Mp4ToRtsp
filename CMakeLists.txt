@@ -9,6 +9,9 @@ link_directories(./thirdpart/ffmpeg/lib)
 include_directories(./thirdpart/rtspserver/include)
 link_directories(./thirdpart/rtspserver/lib)
 
+include_directories(./thirdpart/srt/include)
+link_directories(./thirdpart/srt/lib)
+
 #include_directories(./thirdpart/aarch64-himix100-ffmpeg/include)
 #link_directories(./thirdpart/aarch64-himix100-ffmpeg/lib)
 add_definitions(-D__WIN32__ -D_CRT_SECURE_NO_WARNINGS)
@@ -52,3 +55,34 @@ target_link_libraries(UdpMuticastVideo avcodec.lib
 ##        ao z lzma bz2 va
 #        pthread
 #        )
+
+
+add_executable(Mp4ToSrt main_srt.cpp)
+
+target_link_libraries(Mp4ToSrt
+        avcodec.lib
+        avformat.lib
+        avutil.lib
+        avdevice.lib
+        avfilter.lib
+        postproc.lib
+        swresample.lib
+        swscale.lib
+        ws2_32.lib
+        srt.lib
+)
+
+add_executable(H264ToSrt H264ToSrt.cpp)
+
+target_link_libraries(H264ToSrt
+        avcodec.lib
+        avformat.lib
+        avutil.lib
+        avdevice.lib
+        avfilter.lib
+        postproc.lib
+        swresample.lib
+        swscale.lib
+        ws2_32.lib
+        srt.lib
+)
