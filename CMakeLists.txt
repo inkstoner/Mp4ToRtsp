@@ -86,3 +86,18 @@ target_link_libraries(H264ToSrt
         ws2_32.lib
         srt.lib
 )
+
+add_executable(StreamToSrt StreamToSrt2.cpp FFMpegWrapper.cpp FFMpegWrapper.h)
+
+target_link_libraries(StreamToSrt
+        avcodec.lib
+        avformat.lib
+        avutil.lib
+        avdevice.lib
+        avfilter.lib
+        postproc.lib
+        swresample.lib
+        swscale.lib
+        ws2_32.lib
+        srt.lib
+)
