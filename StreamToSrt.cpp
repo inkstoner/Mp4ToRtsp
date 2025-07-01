@@ -18,6 +18,9 @@ extern "C" {
 #include <libavutil/time.h>
 }
 
+const int SRT_LATENCY_MS = 120;
+const int SRT_PAYLOAD_SIZE = 1316; // 7 * 188-byte TS packets
+
 // --- 线程安全的TS包队列 ---
 class TSPacketQueue {
 public:
@@ -256,16 +259,33 @@ void srt_sender_thread_func(SRTSOCKET client_sock, TSPacketQueue* queue) {
             break; // 队列已停止
         }
 
-        int ret = srt_sendmsg(client_sock, (const char*)ts_pkt->data, ts_pkt->size, -1, 0);
+        std::cout << "send size " << ts_pkt->size << std::endl;
+
+        int bytes_sent_total = 0;
+        int buf_size = ts_pkt->size;
+        while (bytes_sent_total < buf_size) {
+            int chunk_size = buf_size - bytes_sent_total;
+            if (chunk_size > SRT_PAYLOAD_SIZE) {
+                chunk_size = SRT_PAYLOAD_SIZE;
+            }
+
+            int result = srt_sendmsg(client_sock, (const char*)ts_pkt->data + bytes_sent_total, chunk_size, -1, 0);
+
+            if (result == SRT_ERROR) {
+                if (srt_getlasterror(nullptr) == SRT_ECONNLOST) {
+                    std::cerr << "SRT send error: Connection lost." << std::endl;
+                } else {
+                    std::cerr << "SRT send error: " << srt_getlasterror_str() << std::endl;
+                }
+                av_packet_free(&ts_pkt);
+                break;
+            }
+
+            bytes_sent_total += result;
+        }
+
         av_packet_free(&ts_pkt);
 
-        if (ret == SRT_ERROR) {
-            std::cerr << "srt_sendmsg: " << srt_getlasterror_str() << std::endl;
-            if (srt_getlasterror(NULL) == SRT_ECONNLOST) {
-                std::cout << "Client disconnected." << std::endl;
-            }
-            break;
-        }
     }
     srt_close(client_sock);
 }
@@ -298,6 +318,13 @@ int main(int argc, char** argv) {
         std::cerr << "srt_create_socket: " << srt_getlasterror_str() << std::endl;
         return -1;
     }
+
+    // 设置为监听模式
+    bool yes = true;
+    srt_setsockopt(serv_sock, 0, SRTO_SENDER, &yes, sizeof(yes));
+
+    int latency = SRT_LATENCY_MS;
+    srt_setsockopt(serv_sock, 0, SRTO_PEERLATENCY, &latency, sizeof(latency));
 
     struct sockaddr_in sa;
     memset(&sa, 0, sizeof(sa));

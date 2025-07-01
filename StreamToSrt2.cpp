@@ -78,6 +78,7 @@ struct StreamContext {
     int64_t next_pts = 0;
     AVRational time_base = {1, 90000};
     TSPacketQueue* ts_queue = nullptr;
+    int clientCount = 0;
 };
 
 StreamContext context;
@@ -87,6 +88,9 @@ StreamContext context;
 // opaque指针将指向我们的StreamContext
 int write_ts_callback(void* opaque, uint8_t* buf, int buf_size) {
     StreamContext* context = static_cast<StreamContext*>(opaque);
+
+    if(context->clientCount <= 0)
+        return buf_size;
 
     AVPacket* ts_pkt = av_packet_alloc();
     if (!ts_pkt) return AVERROR(ENOMEM);
@@ -162,8 +166,8 @@ void process_h264_data(StreamContext* _context, const uint8_t* h264_data, int si
 
     int frame_rate = 25;
     pkt.pts = _context->next_pts;
-    pkt.dts = _context->next_pts;
-    pkt.duration = _context->time_base.den / frame_rate;
+    pkt.dts = _context->next_pts-3600;
+    pkt.duration = 3600;//_context->time_base.den / frame_rate;
 //    _context->next_pts += pkt.duration;
 
     int ret = av_interleaved_write_frame(_context->ofmt_ctx, &pkt);
@@ -175,9 +179,12 @@ void process_h264_data(StreamContext* _context, const uint8_t* h264_data, int si
 }
 
 void RecvData(unsigned char *data, int dataLen,int64_t pts) {
+    static long count = 0;
+    count++;
+
     int64_t addpts = pts+ 1000000000000;//补位
     printf("get data %d pts %lld\n", dataLen,addpts);
-    context.next_pts = addpts;
+    context.next_pts = count*3600;
     process_h264_data(&context, data, dataLen);
 }
 
@@ -277,13 +284,14 @@ int main(int argc, char** argv) {
         char client_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
         std::cout << "New client connected from " << client_ip << ":" << ntohs(client_addr.sin_port) << std::endl;
-
+        context.clientCount++;
         // 为每个客户端创建一个新的发送线程
         // 在这个简单示例中，我们一次只处理一个客户端
         // 处理完后，线程会结束，我们可以接受下一个连接
         std::thread srt_sender_thread(srt_sender_thread_func, client_sock, &ts_queue);
         srt_sender_thread.join(); // 等待当前客户端处理完毕
         std::cout << "Client session finished. Ready for new connection." << std::endl;
+        context.clientCount--;
     }
 
     // --- 清理 ---

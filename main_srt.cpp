@@ -6,7 +6,7 @@
 
 // SRT a头文件
 #include <srt/srt.h>
-
+#include "rtsp_demo.h"
 // FFmpeg 头文件 (必须是 C 风格的 include)
 extern "C" {
 #include <libavformat/avformat.h>
@@ -14,6 +14,9 @@ extern "C" {
 #include <libavutil/avutil.h>
 #include <libavutil/time.h>
 }
+
+rtsp_demo_handle g_rtsplive = NULL;
+rtsp_session_handle session = NULL;
 
 char av_error[AV_ERROR_MAX_STRING_SIZE] = { 0 };
 #define av_err2str(errnum) av_make_error_string(av_error, AV_ERROR_MAX_STRING_SIZE, errnum)
@@ -65,6 +68,7 @@ void stream_file_to_client(SRTSOCKET client_sock, const std::string& filename) {
     const size_t avio_buffer_size = 8192; // 8KB 缓冲区 //缓冲区改小1316也可以
 
     int ret = 0;
+    int m_video_st_index = -1;
 
     // 1. 打开输入文件 (MP4)
     if ((ret = avformat_open_input(&ifmt_ctx, filename.c_str(), nullptr, nullptr)) < 0) {
@@ -96,6 +100,10 @@ void stream_file_to_client(SRTSOCKET client_sock, const std::string& filename) {
     // 4. 复制流信息
     for (unsigned int i = 0; i < ifmt_ctx->nb_streams; i++) {
         AVStream *in_stream = ifmt_ctx->streams[i];
+
+        if (in_stream->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+            m_video_st_index = i;
+        }
         AVStream *out_stream = avformat_new_stream(ofmt_ctx, nullptr);
         if (!out_stream) {
             std::cerr << "Failed to allocate output stream" << std::endl;
@@ -126,12 +134,62 @@ void stream_file_to_client(SRTSOCKET client_sock, const std::string& filename) {
 
     // 6. 循环读取、转封装和发送数据包
     AVPacket pkt;
+
+
     long long start_time = av_gettime();
 
     std::cout << "Starting to stream..." << std::endl;
+    AVBSFContext * h264bsfc;
+    const AVBitStreamFilter * filter = av_bsf_get_by_name("h264_mp4toannexb");
+    ret = av_bsf_alloc(filter, &h264bsfc);
+    avcodec_parameters_copy(h264bsfc->par_in, ifmt_ctx->streams[m_video_st_index]->codecpar);
+    av_bsf_init(h264bsfc);
+
     while (av_read_frame(ifmt_ctx, &pkt) >= 0) {
         AVStream *in_stream = ifmt_ctx->streams[pkt.stream_index];
         AVStream *out_stream = ofmt_ctx->streams[pkt.stream_index];
+
+
+        if(m_video_st_index == pkt.stream_index)
+        {
+            AVPacket dst_pkt;
+            av_init_packet(&dst_pkt);
+            dst_pkt.data = NULL;
+            dst_pkt.size = 0;
+            // 深拷贝数据
+            dst_pkt.data = (uint8_t*)av_malloc(pkt.size);
+            if (!dst_pkt.data) {
+                // 内存分配失败
+            }
+            memcpy(dst_pkt.data, pkt.data, pkt.size);
+            dst_pkt.size = pkt.size;
+
+// 拷贝元数据（pts/dts/stream_index等）
+            dst_pkt.pts = pkt.pts;
+            dst_pkt.dts = pkt.dts;
+            dst_pkt.stream_index = pkt.stream_index;
+            dst_pkt.flags = pkt.flags;
+            dst_pkt.duration = pkt.duration;
+
+// 拷贝 Side Data（可选）
+            if (pkt.side_data_elems > 0) {
+                av_packet_copy_props(&dst_pkt, &pkt); // FFmpeg API 复制属性
+            }
+
+            ret = av_bsf_send_packet(h264bsfc, &dst_pkt);
+            if(ret < 0) printf("av_bsf_send_packet error");
+
+            while ((ret = av_bsf_receive_packet(h264bsfc, &dst_pkt)) == 0) {
+                if (g_rtsplive && session) {
+                    rtsp_sever_tx_video(g_rtsplive, session, dst_pkt.data ,
+                                        dst_pkt.size, dst_pkt.pts);
+                }
+
+            }
+            // 使用后需手动释放 dst_pkt 的数据
+            av_freep(&dst_pkt.data);    // 释放数据缓冲区
+        }
+
 
         // 控制发送速率，模拟直播
         long long now = av_gettime() - start_time;
@@ -151,6 +209,7 @@ void stream_file_to_client(SRTSOCKET client_sock, const std::string& filename) {
             av_packet_unref(&pkt);
             break;
         }
+
         av_packet_unref(&pkt);
     }
     std::cout << "Streaming finished." << std::endl;
@@ -185,6 +244,11 @@ int main(int argc, char *argv[]) {
     avformat_network_init(); // Initialization of network components
 
     std::string filename = argv[1];
+
+    if(g_rtsplive==NULL) {
+        g_rtsplive = create_rtsp_demo(7554);
+        session = create_rtsp_session(g_rtsplive, "/live");
+    }
 
     // 初始化 SRT
     srt_startup();

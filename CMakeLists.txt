@@ -70,6 +70,7 @@ target_link_libraries(Mp4ToSrt
         swscale.lib
         ws2_32.lib
         srt.lib
+        RtspSever
 )
 
 add_executable(H264ToSrt H264ToSrt.cpp)
@@ -87,9 +88,24 @@ target_link_libraries(H264ToSrt
         srt.lib
 )
 
-add_executable(StreamToSrt StreamToSrt2.cpp FFMpegWrapper.cpp FFMpegWrapper.h)
+add_executable(StreamToSrt StreamToSrt.cpp FFMpegWrapper.cpp FFMpegWrapper.h)
 
 target_link_libraries(StreamToSrt
+        avcodec.lib
+        avformat.lib
+        avutil.lib
+        avdevice.lib
+        avfilter.lib
+        postproc.lib
+        swresample.lib
+        swscale.lib
+        ws2_32.lib
+        srt.lib
+)
+
+add_executable(StreamToSrt2 StreamToSrt2.cpp FFMpegWrapper.cpp FFMpegWrapper.h)
+
+target_link_libraries(StreamToSrt2
         avcodec.lib
         avformat.lib
         avutil.lib
